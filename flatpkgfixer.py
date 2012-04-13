@@ -4,6 +4,13 @@
 flatpkgfixer.py
 
 """
+#
+# NOTE:
+# This is a modified version of the original. The modifications
+# replace pkgutil usage with strip_pkg_signature.py. The original
+# can be found here:
+# http://managingosx.wordpress.com/2012/03/24/fixing-packages-with-expired-signatures
+#
 # Copyright 2012 Greg Neagle.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -26,6 +33,8 @@ import shutil
 import subprocess
 import tempfile
 from xml.parsers.expat import ExpatError
+
+from strip_pkg_signature import strip_signature, XARFormatError
 
 def getFirstPlist(textString):
     """Gets the next plist from a text string that may contain one or
@@ -125,42 +134,10 @@ def unmountdmg(mountpoint):
             print >> sys.stderr, 'Failed to unmount %s' % mountpoint
 
 
-class ExpandOrFlattenError(Exception):
-    '''Base error for exapnding and flattening pkgs'''
-
-class ExpandPkgError(ExpandOrFlattenError):
-    '''Exception to raise if there's an error while expanding a pkg'''
-
-class FlattenPkgError(ExpandOrFlattenError):
-    '''Exception to raise if there's an error while flatening a pkg'''
-
 def expandAndFlatten(sourcepkg, destination=None):
-    '''Uses pkgutil to expand and reflatten a flat package.
-    A side-effect is that any package signing will be removed.'''
+    '''Uses strip_pkg_signature to remove package signing.'''
 
-    if not destination:
-        destination = sourcepkg
-    if os.path.isdir(destination):
-        destination = os.path.join(destination, os.path.basename(sourcepkg))
-    expand_dir = os.path.join(TMPDIR, os.path.basename(sourcepkg))
-    print "Expanding %s to %s..." % (sourcepkg, expand_dir)
-    try:
-        subprocess.check_call(
-            ['/usr/sbin/pkgutil', '--expand', sourcepkg, expand_dir])
-    except subprocess.CalledProcessError, e:
-        raise ExpandPkgError("ERROR: %s expanding %s" % (e, sourcepkg))
-    print "Flattening %s to %s..." % (expand_dir, destination)
-    if os.path.exists(destination):
-        os.unlink(destination)
-    try:
-        subprocess.check_call(
-            ['/usr/sbin/pkgutil', '--flatten', expand_dir, destination])
-    except subprocess.CalledProcessError, e:
-        # lets try a different way
-        raise FlattenPkgError("ERROR: %s while flattening %s" % (e, expand_dir))
-
-    #clean up our expand_dir
-    shutil.rmtree(expand_dir, ignore_errors=True)
+    strip_signature(sourcepkg, out_fn=destination)
 
 
 def cleanupFromFailAndExit(errmsg=''):
@@ -211,7 +188,7 @@ def main():
             cleanupFromFailAndExit('%s is a bundle-style package!')
         try:
             expandAndFlatten(source_item, dest_item)
-        except ExpandOrFlattenError, e:
+        except XARFormatError, e:
             cleanupFromFailAndExit(str(e))
 
     elif source_item.endswith('.dmg'):
@@ -242,7 +219,7 @@ def main():
                                 flattened_path = os.path.join(
                                     flattened_dir, name)
                                 expandAndFlatten(filepath, flattened_path)
-                            except ExpandOrFlattenError, e:
+                            except XARFormatError, e:
                                 unmountdmg(mountpoint)
                                 cleanupFromFailAndExit(str(e))
                             # copy reflattened package back to diskimage

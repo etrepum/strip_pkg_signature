@@ -6,9 +6,15 @@ import zlib
 import struct
 import hashlib
 import argparse
+from binascii import b2a_hex
 from xml.etree import cElementTree as etree
 from tempfile import NamedTemporaryFile
-from shutil import copyfileobj
+from shutil import copyfileobj, copy2
+
+
+class XARFormatError(ValueError):
+    pass
+
 
 class NoChecksum(object):
     def __init__(self, initial=''):
@@ -17,11 +23,13 @@ class NoChecksum(object):
     def digest(self):
         return ''
 
+
 MAGIC = 0x78617221 # xar!
 VERSIONS = {0, 1}
 CHECKSUM = {0: NoChecksum,
             1: hashlib.sha1,
             2: hashlib.md5}
+
 
 class Struct(object):
     def __init__(self, fmt, fields):
@@ -39,40 +47,78 @@ class Struct(object):
         return struct.pack(self.fmt,
                            *(dct[field] for field in self.fields))
 
+
 HEADER = Struct('>IHHQQI',
                 ('magic', 'size', 'version',
                 'toc_length_compressed', 'toc_length_uncompressed',
                 'cksum_alg'))
 
+
+def toc_digest(hdr, ztocdata):
+    return CHECKSUM[hdr['cksum_alg']](ztocdata).digest()
+
+
 def readtoc(f):
     hdr = HEADER.fromfile(f)
-    assert(hdr['magic'] == MAGIC)
-    assert(hdr['version'] in VERSIONS)
-    assert(hdr['cksum_alg'] in CHECKSUM)
-    tocdata_compressed = f.read(hdr['toc_length_compressed'])
-    tocdata = zlib.decompress(tocdata_compressed)
-    assert(len(tocdata) == hdr['toc_length_uncompressed'])
-    digest = CHECKSUM[hdr['cksum_alg']](tocdata_compressed).digest()
+    if hdr['magic'] != MAGIC:
+        raise XARFormatError('magic %r != %r' %
+                             (hdr['magic'], MAGIC))
+    if hdr['version'] not in VERSIONS:
+        raise XARFormatError('version %r not supported' %
+                             (hdr['version'],))
+    if hdr['cksum_alg'] not in CHECKSUM:
+        raise XARFormatError('cksum_alg %r not supported' %
+                             (hdr['cksum_alg'],))
+    ztocdata = f.read(hdr['toc_length_compressed'])
+    tocdata = zlib.decompress(ztocdata)
+    if hdr['toc_length_uncompressed'] != len(tocdata):
+        raise XARFormatError('toc_length_uncompressed %r != %r' %
+                             (hdr['toc_length_uncompressed'],
+                              len(tocdata)))
+    digest = toc_digest(hdr, ztocdata)
     if digest:
         orig_digest = f.read(len(digest))
-        assert(digest == orig_digest)
+        if digest != orig_digest:
+            raise XARFormatError('digest %r != %r' %
+                                 (b2a_hex(digest),
+                                  b2a_hex(orig_digest)))
     return hdr, tocdata
 
-def strip_signature(fn, dry_run=False, keep_old=False):
+
+def strip_signature(fn, out_fn=None, dry_run=False, keep_old=False):
+    if out_fn is not None:
+        if keep_old:
+            raise TypeError('keep_old is not compatible with out_fn')
+        if os.path.isdir(out_fn):
+            out_fn = os.path.join(out_fn, os.path.basename(fn))
+    def do(msg, func, *args, **kw):
+        if not dry_run:
+            if func is not None:
+                func(*args, **kw)
+        else:
+            msg = msg + ' (dry run)'
+        print fn, msg
+    in_place = out_fn is None
     with open(fn, 'rb') as f:
         hdr, tocdata = readtoc(f)
         new_tocdata = strip_toc_signature(tocdata)
         if new_tocdata is None:
-            print fn, '- SKIPPED (already unsigned)'
-        elif dry_run:
-            print fn, '- would replace signature (dry-run)'
+            if in_place:
+                do('SKIPPED, already unsigned',
+                   None)
+            else:
+                do('COPIED, already unsigned',
+                   copy2, fn, out_fn)
         else:
-            write_xar(fn, hdr, new_tocdata, f, keep_old)
-            print fn, '- replaced toc'
+            do('REPLACED TOC',
+               write_xar,
+               fn if in_place else out_fn,
+               hdr, new_tocdata, f, keep_old)
+
 
 def write_xar(fn, hdr, tocdata, heap, keep_old=False):
     ztocdata = zlib.compress(tocdata)
-    digest = CHECKSUM[hdr['cksum_alg']](ztocdata).digest()
+    digest = toc_digest(hdr, ztocdata)
     newhdr = dict(hdr,
                   toc_length_uncompressed=len(tocdata),
                   toc_length_compressed=len(ztocdata))
@@ -102,6 +148,7 @@ def write_xar(fn, hdr, tocdata, heap, keep_old=False):
         os.link(fn, oldfn)
     os.rename(outf.name, fn)
 
+
 def strip_toc_signature(xmlstr):
     et = etree.fromstring(xmlstr)
     toc = et.find('toc')
@@ -112,6 +159,7 @@ def strip_toc_signature(xmlstr):
         return None
     toc.remove(sig)
     return etree.tostring(et)
+
 
 def main():
     parser = argparse.ArgumentParser(sys.argv[0])
