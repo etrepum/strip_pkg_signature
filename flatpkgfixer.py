@@ -93,7 +93,7 @@ def mountdmg(dmgpath, use_shadow=False):
         cmd.extend(['-shadow', shadowpath])
     else:
         shadowpath = None
-    proc = subprocess.Popen(cmd, bufsize=-1, 
+    proc = subprocess.Popen(cmd, bufsize=-1,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE)
     (pliststr, err) = proc.communicate(stdin)
     if proc.returncode:
@@ -123,21 +123,21 @@ def unmountdmg(mountpoint):
                                 '-force'])
         if retcode:
             print >> sys.stderr, 'Failed to unmount %s' % mountpoint
-            
-            
+
+
 class ExpandOrFlattenError(Exception):
     '''Base error for exapnding and flattening pkgs'''
 
 class ExpandPkgError(ExpandOrFlattenError):
     '''Exception to raise if there's an error while expanding a pkg'''
-    
+
 class FlattenPkgError(ExpandOrFlattenError):
     '''Exception to raise if there's an error while flatening a pkg'''
 
 def expandAndFlatten(sourcepkg, destination=None):
     '''Uses pkgutil to expand and reflatten a flat package.
     A side-effect is that any package signing will be removed.'''
-    
+
     if not destination:
         destination = sourcepkg
     if os.path.isdir(destination):
@@ -158,7 +158,7 @@ def expandAndFlatten(sourcepkg, destination=None):
     except subprocess.CalledProcessError, e:
         # lets try a different way
         raise FlattenPkgError("ERROR: %s while flattening %s" % (e, expand_dir))
-    
+
     #clean up our expand_dir
     shutil.rmtree(expand_dir, ignore_errors=True)
 
@@ -188,15 +188,15 @@ def main():
         print >> sys.stderr, 'Too many arguments!'
         p.print_usage(sys.stderr)
         exit(-1)
-        
+
     if len(arguments) < 2:
         print >> sys.stderr, 'Too few arguments!'
         p.print_usage(sys.stderr)
         exit(-1)
-        
+
     source_item = arguments[0]
     dest_item = arguments[1]
-    
+
     if source_item == dest_item:
         print >> sys.stderr, "Source and destination can't be the same!"
         exit(-1)
@@ -204,7 +204,7 @@ def main():
     if not os.path.exists(source_item):
         print >> sys.stderr, "%s doesn't exist!" % source_item
         exit(-1)
-    
+
     TMPDIR = tempfile.mkdtemp()
     if source_item.endswith('.pkg'):
         if not os.path.isfile(source_item):
@@ -213,7 +213,7 @@ def main():
             expandAndFlatten(source_item, dest_item)
         except ExpandOrFlattenError, e:
             cleanupFromFailAndExit(str(e))
-        
+
     elif source_item.endswith('.dmg'):
         # check to see if we're root
         # need to be root to copy things into the DMG with the right
@@ -222,7 +222,7 @@ def main():
             print >> sys.stderr, (
                 'You must run this as root, or via sudo to fix disk images.')
             exit(-1)
-        
+
         print 'Mounting %s...' % source_item
         mountpoints, shadowpath = mountdmg(source_item, use_shadow=True)
         if not mountpoints:
@@ -254,15 +254,15 @@ def main():
             unmountdmg(mountpoint)
             cleanupFromFailAndExit(
                 'Error %s processing packages in %s' % (e, source_item))
-        
+
         print 'Unmounting %s...' % source_item
         unmountdmg(mountpoint)
-        
+
         # convert original diskimage + shadow to new UDZO image
         if os.path.isdir(dest_item):
             dest_item = os.path.join(dest_item, os.path.basename(source_item))
         print 'Creating new disk image at %s...' % os.path.abspath(dest_item)
-        cmd = ['/usr/bin/hdiutil', 'convert', '-format', 'UDZO', 
+        cmd = ['/usr/bin/hdiutil', 'convert', '-format', 'UDZO',
                '-o', dest_item, source_item, '-shadow', shadowpath]
         try:
             subprocess.check_call(cmd)
@@ -271,14 +271,13 @@ def main():
                 'Failed to create %s at: %s' % (dest_item, e))
 
         print 'Done! Converted DMG is at %s' % dest_item
-        
+
     else:
         print >> sys.stderr, "Don't know what to do with %s!" % source_item
-        
+
     # clean up
     shutil.rmtree(TMPDIR, ignore_errors=True)
 
 
 if __name__ == '__main__':
     main()
-
