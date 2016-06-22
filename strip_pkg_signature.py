@@ -157,7 +157,6 @@ def strip_toc_signature(xmlstr):
     nosig = True
     for sigelem in ('signature', 'x-signature'):
         sig = toc.find(sigelem)
-        print sigelem, sig
         if sig:
             nosig = False
             toc.remove(sig)
