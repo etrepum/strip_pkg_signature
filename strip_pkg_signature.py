@@ -154,10 +154,15 @@ def strip_toc_signature(xmlstr):
     toc = et.find('toc')
     if not toc:
         return None
-    sig = toc.find('signature')
-    if not sig:
+    nosig = True
+    for sigelem in ('signature', 'x-signature'):
+        sig = toc.find(sigelem)
+        print sigelem, sig
+        if sig:
+            nosig = False
+            toc.remove(sig)
+    if nosig:
         return None
-    toc.remove(sig)
     return etree.tostring(et)
 
 
